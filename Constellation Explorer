@@ -1,0 +1,524 @@
+from cmu_graphics import *
+import math
+import random
+
+'''
+This project is an interactive night-sky explorer application with two modes, Learn mode 
+and Game mode. 
+
+In Learn mode, users can explore constellations by navigating between sky 
+regions and hovering over constellations to preview their figures. Clicking on a constellation
+reveals additional information, allowing for self-guided exploration and education. 
+
+In Game mode, users are challenged to locate specific constellations within a time limit, 
+and with certain constraints: 
+Easy: 2 minutes, no penalties
+Intermediate: 1.5 minutes, limited lives
+Hard: 1 minute, restricted "telescope" vision, and limited lives
+
+Core features: 
+- Dynamic slide-based navigation
+- Dual-mode architecture
+- Interactive constellation detection
+- Difficulty scaling with timers, lives, and vision constraints
+- Real-time feedback system
+- UI rendering using app variables
+
+Grading Shortcuts:
+Learning mode is pretty straightforward, so there are no shortcuts. Have fun exploring!
+Game mode has three difficulties. At any point, you can press 'p' to pause, although this
+is not part of the game itself. To view what happens when you "win" (i.e. find all the 
+constellations in a given time), press the 'w' key. To find out what happens when you lose, 
+press 'l'. To see features that lead to 'game over', you can set the difficulty to hard and 
+wait for the timer to run out, or click on three incorrect constellations to lose all of 
+your lives. 
+'''
+#========================
+#   App Initialization
+#========================
+
+def onAppStart(app):
+    app.stepsPerSecond = 10
+    #Slide images were hand-drawn
+    app.slideImages = ['cmu://1166316/46550149/Project+Slides-2-1.jpg',
+                       'cmu://1166316/46550181/Project+Slides-3.jpg', 
+                       'cmu://1166316/46550169/Project+Slides-4.jpg', 
+                       'cmu://1166316/46550197/Project+Slides-5.jpg', 
+                       'cmu://1166316/46550219/Project+Slides-6.jpg']
+    app.learnConstellation = True
+    app.findConstellation = False
+    app.specialButtons = ['left', 'up', 'right', 'down', 'instructions']
+    app.buttonOpacities = [20] * 5 
+    app.prevSlide = None
+    app.mouseX = app.mouseY = None
+    
+    initializeButtons(app)
+    initializeConstellations(app)
+    initializeGameInfo(app)
+    resetApp(app)
+    
+def initializeButtons(app):
+    def startGame(): 
+        if not (app.gameOver or app.youWon or app.gameInProgress) and app.findConstellation:
+            app.timer = getTimeType(app)
+            app.gameInProgress = True
+            
+    def resetGame(): 
+        if app.gameInProgress or app.gameOver or app.youWon:
+            resetApp(app)
+        
+    def switchMode():
+        if app.showInstructions:
+            app.learnConstellation, app.findConstellation = not app.learnConstellation, not app.findConstellation
+            resetApp(app)
+        
+    def exitInstructions(): 
+        if app.showInstructions:
+            app.showInstructions = False
+        
+    def makeEasy(): 
+        if app.showInstructions:
+            app.difficulty = 'easy'
+            app.showInstructions = False
+    
+    def makeIntermediate(): 
+        if app.showInstructions:
+            app.difficulty = 'intermediate'
+            app.lives = 5
+            app.showInstructions = False
+
+    
+    def makeHard(): 
+        if app.showInstructions:
+            app.difficulty = 'hard'
+            app.lives = 3
+            app.showInstructions = False
+
+        
+    app.Start = Button(460, 20, 80, 40, 'lightGreen', 'Start', 16, startGame)
+    app.Reset = Button(460, 20, 80, 40, 'lightGreen', 'Reset', 16, resetGame)
+    app.SwitchMode = Button(320, 455, 120, 30, 'brown', 'Switch Mode', 14, switchMode, opacity = 40)
+    app.ExitInstructions = Button(160, 455, 60, 30, 'brown', 'Exit', 14, exitInstructions, opacity = 40)
+    app.Easy = Button(170, 400, 80, 40, 'green', 'Easy', 14, makeEasy, opacity = 60)
+    app.Intermediate = Button(260, 400, 80, 40, 'yellow', 'Intermediate', 11, makeIntermediate)
+    app.Hard = Button(350, 400, 80, 40, 'red', 'Hard', 14, makeHard)
+    app.buttons = [app.SwitchMode, app.ExitInstructions, app.Easy, app.Intermediate, app.Hard]
+    
+def initializeConstellations(app): 
+    app.constellations = [{'Orion', 'Cassiopeia'}, {'Ursa Minor', 'Ursa Major'}, {'Canis Major', 'Crux'}, {'Centaurus', 'Aquila'}, {'Cygnus', 'Pegasus'}]
+    app.constellationLocations = {'Orion': (160, 260, 140, 320), 'Cassiopeia':(420, 500, 200, 380),
+                                  'Ursa Minor': (80, 250, 300, 360), 'Ursa Major': (200, 520, 120, 240),
+                                  'Canis Major': (80, 300, 120, 240), 'Crux': (320, 480, 280, 400),
+                                  'Centaurus': (290, 520, 140, 360), 'Aquila': (110, 220, 250, 380),
+                                  'Cygnus': (90, 250, 80, 300), 'Pegasus': (380, 540, 360, 520)}
+    #Following images are AI-generated
+    app.constellationInfo = {'Orion': ('cmu://1166316/46567294/orion.png', 240, 230, 0.6, -30), #url, cx, cy, sizeFactor, rotateAngle 
+                               'Cassiopeia':('cmu://1166316/46567968/cassiopeia.png',450, 310, 0.65, -30),
+                               'Ursa Minor': ('cmu://1166316/46570401/download+(1).png', 180, 360, 0.9, -30),
+                               'Ursa Major': ('cmu://1166316/46580020/ursamajor1.png', 400, 170, 1, -30),
+                               'Canis Major': ('cmu://1166316/46580033/download+(2).png', 200, 180, 1, -10),
+                               'Crux': ('cmu://1166316/46580065/crux.png', 440, 410, 0.5, -5),
+                               'Centaurus': ('cmu://1166316/46580097/centaurus.png', 430, 280, 1.3, -5),
+                               'Aquila': ('cmu://1166316/46580115/aquila.png', 190, 340, 0.8, -30),
+                               'Cygnus': ('cmu://1166316/46580233/cygnus.png', 190, 200, 2, 10),
+                               'Pegasus': ('cmu://1166316/46580155/pegasus.png', 480, 450, 1.2, 10)}
+                                      
+    app.descriptions = {'Orion': 'cmu://1166316/46593335/Screenshot+2026-04-22+113829.png', 
+                      'Cassiopeia':'cmu://1166316/46638659/Screenshot+2026-04-23+2116051.png',
+                      'Ursa Minor': 'cmu://1166316/46593375/Screenshot+2026-04-22+113908.png',
+                      'Ursa Major': 'cmu://1166316/46593398/Screenshot+2026-04-22+113936.png',
+                      'Canis Major': 'cmu://1166316/46593420/Screenshot+2026-04-22+113950.png',
+                      'Crux': 'cmu://1166316/46593441/Screenshot+2026-04-22+114000.png',
+                      'Centaurus': 'cmu://1166316/46593463/Screenshot+2026-04-22+114009.png',
+                      'Aquila': 'cmu://1166316/46593519/Screenshot+2026-04-22+114025.png',
+                      'Cygnus': 'cmu://1166316/46593537/Screenshot+2026-04-22+114042.png',
+                      'Pegasus': 'cmu://1166316/46593563/Screenshot+2026-04-22+114052.png'}
+
+def initializeGameInfo(app):
+    app.showInstructions = False
+    app.showDescription = False
+    app.showConstellation = None
+    app.pickedConstellation = None
+    app.gameInProgress = False
+    app.timer = 90
+    app.lives = 0
+    app.difficulty = 'easy'
+    app.easyTime, app.medTime, app.hardTime = 120, 90, 60
+    
+def resetApp(app): 
+    app.clickedConstellations = []
+    app.currentConstellation = random.choice(list(app.descriptions))
+    app.slides, app.slideTop = [True, False, False, False], False
+    app.gameOver, app.youWon, app.gameInProgress = False, False, False
+    app.errorMessage = False
+    app.errorTime = 0
+    app.timer = getTimeType(app)
+
+
+#============
+#   View
+#============
+
+def redrawAll(app):
+    #game mode
+    if app.learnConstellation:
+        drawLearnConstellation(app)
+    else: 
+        drawFindConstellation(app)
+        
+    #draw instructions
+    if app.showInstructions: 
+        drawInstructions(app)
+    else: 
+        drawRect(80, 40, 80, 30, align='center', fill='grey', opacity=app.buttonOpacities[4])
+        drawLabel('Instructions', 80, 40, fill='white', align='center', font='montserrat', bold=True, size=11)
+
+
+def drawInstructions(app): 
+    #draw mode
+    drawRect(app.width//2, app.height//2, 300, 400, align='center', fill='beige', border='brown', borderWidth=3)
+    if app.learnConstellation:
+        instructions = 'cmu://1166316/46637329/download+(3).png'
+        imageWidth, imageHeight = getImageSize(instructions)
+        drawImage(instructions, app.width//2, app.height//2-10, align='center', width=0.6*imageWidth, height=0.6*imageHeight)
+        label = 'Learn the Constellations!'
+    elif app.findConstellation:
+        instructions = 'cmu://1166316/46637387/1fab8dd6-e20c-450f-9d82-2dd692c515c9.png'
+        imageWidth, imageHeight = getImageSize(instructions)
+        drawImage(instructions, app.width//2, app.height//2-35, align='center', width=0.65*imageWidth, height=0.65*imageHeight)
+        label = 'Find the Constellations!'
+        (app.Easy).draw()
+        (app.Intermediate).draw()
+        (app.Hard).draw()
+    drawLabel(f'MODE: {label}', 300, 120, fill='black', align='center', size=14, font='montserrat', bold=True)
+    (app.ExitInstructions).draw()
+    
+    #draw switch mode and difficulty buttons
+    (app.SwitchMode).draw()
+    if app.findConstellation: 
+        (app.Easy).draw()
+        (app.Intermediate).draw()
+        (app.Hard).draw()
+
+def drawFindConstellation(app): 
+    drawSetup(app)
+    
+    #restricted vision
+    if app.difficulty == 'hard': 
+        drawVisionMask(app)
+    
+    #handle start/reset game
+    if not app.gameInProgress: 
+        if not(app.gameOver or app.youWon): 
+            (app.Start).draw()
+        else: 
+            (app.Reset).draw()
+    else: 
+        (app.Reset).draw()
+   
+    if app.gameInProgress and not(app.gameOver or app.youWon): 
+        color = 'white' if float(app.timer) > 10 else 'red'
+        drawLabel(app.timer, 160, 40, align='center', size=25, font='montserrat', fill=color, bold=True)
+    
+    playGame(app)
+        
+
+def playGame(app):
+    i = findCurrentSlide(app)
+    #prompt
+    if app.gameInProgress: 
+        drawLabel(f'Find {app.currentConstellation}', 120, 80, size=20, fill='white', align='center', 
+                    font = 'montserrat', bold=True)
+    
+    #draw found constellations
+    for constellation in app.clickedConstellations: 
+        if constellation in app.constellations[i] and app.gameInProgress: 
+            url, cx, cy, sizeFactor, angle = app.constellationInfo[constellation]
+            imageWidth, imageHeight = getImageSize(url)
+            drawImage(url, cx, cy, width=sizeFactor*imageWidth, height=sizeFactor*imageHeight, 
+                      align='center', rotateAngle = angle)
+   
+    #handle incorrect click
+    if app.errorMessage: 
+        drawRect(app.width//2, app.height//2, app.width, 40, fill='white', opacity = 40, align='center')
+        drawLabel(f'Not quite! This constellation is: {app.pickedConstellation}', app.width//2, app.height//2, size = 20, fill='pink', bold=True, font='montserrat')
+    
+    #draw hearts/lives
+    if app.difficulty != 'easy':
+        heart = 'cmu://1166316/46637434/471da8fa-7c7f-47ac-8ad8-1e8cc7ef787f.png'
+        for i in range(app.lives): 
+            imageWidth, imageHeight = getImageSize(heart)
+            drawImage(heart, 20, 20 + 40*i, width=0.15*imageWidth, height=0.15*imageHeight, align='center')
+    
+    
+    if app.youWon: 
+        drawLabel('You won!', app.width//2, app.height//2, size = 48, fill='green', bold=True, font='montserrat')
+    elif app.gameOver: 
+        drawLabel('Game Over!', app.width//2, app.height//2, size = 48, fill='red', bold=True, font='montserrat')
+
+def drawVisionMask(app): 
+    cx, cy, r = app.mouseX, app.mouseY, 100
+    telescope = 'cmu://1166316/46649583/unnamed.png'
+    imageWidth, imageHeight = getImageSize(telescope)
+    if (cx, cy) == (None, None): 
+        return
+    if r < cy:
+        drawRect(0, 0, app.width, cy - r, fill='grey', opacity = 90)
+    if (cy + r) < app.height: 
+        drawRect(0, cy + r, app.width, app.height - (cy + r), fill='grey', opacity = 90)
+    if r < cx:
+        drawRect(0, cy - r, cx - r, 2*r, fill='grey', opacity = 90)
+    if (cx + r) < app.width:
+        drawRect(cx + r, cy - r, app.width - (cx + r), 2*r, fill='grey', opacity = 90)
+    drawImage(telescope, cx, cy, align='center', width=0.2*imageWidth, height=0.2*imageHeight)
+
+
+
+def drawLearnConstellation(app):
+    drawSetup(app)
+
+    if app.showConstellation != None: 
+        drawConstellationImage(app)
+        
+    if app.showDescription: 
+        drawConstellationDescription(app)
+
+
+def drawSetup(app): 
+    #draw slide
+    for i in range(len(app.slides)): 
+        if app.slides[i] == True:
+            drawImage(app.slideImages[i], app.width//2, app.height//2, align='center', width=app.width, height=app.height)
+    if app.slideTop == True: 
+        drawImage(app.slideImages[4], app.width//2, app.height//2, align='center', width=app.width, height=app.height)
+    
+    #draw buttons
+    if not app.slideTop:
+        drawCircle(40, app.height//2, 20, align='center', fill='white', opacity=app.buttonOpacities[0])
+        drawCircle(app.width//2, 40, 20, align='center', fill='white', opacity=app.buttonOpacities[1])
+        drawCircle(app.width - 40, app.height//2, 20, align='center', fill='white', opacity=app.buttonOpacities[2])
+        #draw arrows
+        drawLine(30, 300, 50, 300, lineWidth=2, arrowStart = True)
+        drawLine(300, 30, 300, 50, lineWidth=2, arrowStart = True)
+        drawLine(570, 300, 550, 300, lineWidth=2, arrowStart = True)
+
+    else: 
+        drawCircle(app.width//2, app.height-40, 20, align='center', fill='white', opacity=app.buttonOpacities[3])
+        drawLine(300, 570, 300, 550, lineWidth=2, arrowStart = True)
+            
+
+def drawConstellationImage(app):
+    url, cx, cy, sizeFactor, angle = app.constellationInfo[app.showConstellation]
+    imageWidth, imageHeight = getImageSize(url)
+    drawImage(url, cx, cy, width=sizeFactor*imageWidth, height=sizeFactor*imageHeight, 
+              align='center', rotateAngle = angle, opacity = 50)
+    
+def drawConstellationDescription(app): 
+    description = app.descriptions[app.pickedConstellation]
+    imageWidth, imageHeight = getImageSize(description)
+    drawImage(description, app.width//2, app.height//2, align='center', width=0.5*imageWidth, height=0.5*imageHeight)
+            
+#================
+#    Control
+#================
+
+def onKeyPress(app, key):
+    if key == 'p': 
+        app.gameInProgress = not app.gameInProgress
+    if key == 'w': 
+        app.gameInProgress, app.youWon = False, True
+    if key == 'l': 
+        app.gameInProgress, app.gameOver = False, True
+    pass
+
+def onMouseMove(app, mouseX, mouseY): 
+    #for vision mask    
+    app.mouseX, app.mouseY = mouseX, mouseY
+    
+    #check if mouse in special buttons
+    for i in range(len(app.specialButtons)): #excluding exit instructions, switch mode, startGame
+        if inButton(app, mouseX, mouseY, i):
+            #full opacity
+            app.buttonOpacities[i] = 80
+        else: 
+            #low opacity
+            app.buttonOpacities[i] = 20
+            
+    #check if mouse in Constellation
+    i = findCurrentSlide(app)
+    app.showConstellation = inConstellation(app, mouseX, mouseY, i)
+
+
+def onStep(app):
+    #timer 
+    timer = float(app.timer)
+    if app.gameInProgress:
+        timer -= 0.1
+        #the following line was taken from chatGPT
+        app.timer = f'{timer: 0.1f}'
+    
+    #error message timeout    
+    if app.errorMessage: 
+        app.errorTime += 1
+        if app.errorTime == 20:
+            app.errorTime = 0
+            app.errorMessage = False
+    
+    #handle running out of time
+    if app.timer == '0.0' and (len(app.clickedConstellations) != len(app.constellationInfo)): 
+        app.gameInProgress, app.gameOver = False, True
+        app.timer = getTimeType(app)
+
+def onMousePress(app, mouseX, mouseY):
+    #click anywhere to get rid of error message
+    app.errorMessage = False
+    
+    i = findCurrentSlide(app)
+    handleSlideNavigation(app, mouseX, mouseY, i)
+    
+    #open instructions
+    if (inButton(app, mouseX, mouseY, 4) and 
+        not app.showInstructions): 
+        app.showInstructions = True
+     
+    #start/reset buttons 
+    if not app.gameInProgress: 
+        if not(app.gameOver or app.youWon): 
+            (app.Start).handleClick(mouseX, mouseY)
+        else: 
+            (app.Reset).handleClick(mouseX, mouseY)
+    else: 
+        (app.Reset).handleClick(mouseX, mouseY)
+    #other buttons
+    for button in app.buttons: 
+        button.handleClick(mouseX, mouseY)
+    
+    #constellation interaction
+    if app.showConstellation != None: 
+        app.pickedConstellation = app.showConstellation
+        app.showDescription = True
+        if app.gameInProgress:
+            if app.currentConstellation == app.pickedConstellation:
+                handleCorrectClick(app)
+            else:
+                handleIncorrectClick(app)
+    #exit constellation info (click outside description)
+    elif app.showConstellation == None: 
+        app.showDescription = False
+
+
+#==============
+#   Helpers
+#==============
+
+def handleSlideNavigation(app, mouseX, mouseY, i): 
+    if app.slideTop == False: 
+        if inButton(app, mouseX, mouseY, 0): #left
+            app.slides[i] = False
+            j = i - 1
+            app.slides[j] = True 
+            print('left', j, i)
+        if inButton(app, mouseX, mouseY, 1): #up
+            app.prevSlide = i
+            app.slides[i] = False
+            app.slideTop = True 
+            print('up')
+        if inButton(app, mouseX, mouseY, 2): #right
+            app.slides[i] = False
+            j = (i + 1) % 4
+            app.slides[j] = True 
+    elif inButton(app, mouseX, mouseY, 3): #down
+        app.slides[app.prevSlide] = True
+        app.slideTop = False # top slide False
+
+def handleCorrectClick(app): 
+    app.clickedConstellations += [app.currentConstellation]
+    if len(app.clickedConstellations) == len(app.constellationInfo): 
+        app.gameInProgress, app.youWon = False, True
+        app.timer = getTimeType(app)
+    else: 
+        pickNewConstellation(app)
+
+def handleIncorrectClick(app): 
+    app.errorMessage = True
+    if app.difficulty != 'easy': 
+        app.lives -= 1
+        if app.lives == 0: 
+            app.gameInProgress, app.gameOver = False, True
+            
+def pickNewConstellation(app): 
+    while app.currentConstellation in app.clickedConstellations: 
+        app.currentConstellation = random.choice(list(app.descriptions))
+           
+def inConstellation(app, mouseX, mouseY, slide): 
+    potentialConstellations = app.constellations[slide]
+    for constellation in potentialConstellations: 
+        xMin, xMax, yMin, yMax = app.constellationLocations[constellation]
+        if xMin <= mouseX <= xMax and yMin <= mouseY <= yMax: 
+            return constellation
+    return None
+
+#the following class was taken from lauren's lecture           
+class Button: 
+    def __init__(self, left, top, width, height, color, text, textSize, onClickFn, opacity=100,): 
+        self.left = left
+        self.top = top
+        self.width = width
+        self.height = height
+        self.color = color
+        self.text = text
+        self.textSize = textSize
+        self.onClickFn = onClickFn
+        self.opacity = opacity
+    
+    def handleClick(self, mouseX, mouseY): 
+        if ((self.left <= mouseX <= (self.left + self.width)) and 
+        (self.top <= mouseY <= (self.top + self.height))): 
+            self.onClickFn()
+    
+    def draw(self): 
+        drawRect(self.left, self.top, self.width, self.height, fill=self.color, opacity = self.opacity)
+        cx, cy = self.left + self.width/2, self.top + self.height/2
+        drawLabel(self.text, cx, cy, size= self.textSize, bold=True, font='montserrat')
+ 
+#==================
+#    Utility
+#==================
+
+def getTimeType(app): 
+    if app.difficulty == 'easy': 
+        return app.easyTime
+    elif app.difficulty == 'intermediate': 
+        return app.medTime
+    else: 
+        return app.hardTime
+        
+def findCurrentSlide(app): 
+    for i in range(len(app.slides)): 
+        if app.slides[i]: 
+            return i
+    return 4 #top slide, index doesn't exist in app.slides but does in app.images
+    
+def inButton(app, mouseX, mouseY, i): 
+    if app.specialButtons[i] == 'left': 
+        return (distance(mouseX, mouseY, 40, app.height//2) < 40)
+    elif app.specialButtons[i] == 'up': 
+        return (distance(mouseX, mouseY, app.width//2, 40) < 40)
+    elif app.specialButtons[i] == 'right': 
+        return (distance(mouseX, mouseY, app.width - 40, app.height//2) < 40)
+    elif app.specialButtons[i] == 'down': 
+        return (distance(mouseX, mouseY, app.width//2, app.height-40) < 40)
+    elif app.specialButtons[i] == 'instructions': 
+        return (40 <= mouseX <= 120 and 30 <= mouseY <= 50)
+    
+def distance(x1, y1, x2, y2):
+    a = x2 - x1
+    b = y2 - y1
+    c = float (math.sqrt(a**2 + b**2))
+    return abs(c)
+        
+
+def main():
+    runApp(width=600, height=600)
+
+main()
